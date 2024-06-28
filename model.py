@@ -1,4 +1,4 @@
-from transformers import ViTForImageClassification, ViTConfig
+from transformers import ViTForImageClassification, ViTConfig, ViTModel
 import torch
 
 # Configure the Vision Transformer
@@ -16,13 +16,25 @@ config = ViTConfig(
 
 )
 
+print(config.num_labels)
 # Initialize the model
-model = ViTForImageClassification(config)
-print(model)
-print(model.config)
-x = torch.randn((1, 224, 224, 224))
-print(model(x))
+# model = ViTForImageClassification(config)
+model = ViTModel(config)
+# print(model)
+# print(model.config)
+x = torch.randn((4, 224, 224, 224))
+x = model(x)
+x = x.last_hidden_state[:,0,:]
+print(x.shape)
+# x = x.flatten(-1).unsqueeze(0)
+# print(x.shape)
+x = torch.nn.Linear(config.hidden_size, out_features=2)(x)
+print(x.shape)
 
+model1 = ViTForImageClassification(config)
+# print(model1)
+x = torch.randn((4, 224, 224, 224))
+print(model1(x).logits.shape)
 # ViTConfig {
 #   "attention_probs_dropout_prob": 0.0,
 #   "encoder_stride": 16,

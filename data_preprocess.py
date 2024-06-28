@@ -24,14 +24,14 @@ def resample_image(image, new_shape):
 
 new_shape = (224, 224, 224)
 
-for idx, row in df.iterrows():
+for idx, row in df[:1].iterrows():
     img_path = row['image']
-    seg_path = row['seg']
+    # seg_path = row['seg']
     img = nib.load(img_path)
-    seg = nib.load(seg_path)
+    # seg = nib.load(seg_path)
     resized_img = resample_image(img.get_fdata(), new_shape)
-    resized_seg = resample_image(seg.get_fdata(), new_shape)
+    # resized_seg = resample_image(seg.get_fdata(), new_shape)
     final_img = nib.Nifti1Image(resized_img, img.affine)
-    nib.save(final_img, os.path.join('./Data/Resampled/', f'{row['ID']}_resampled_img.nii.gz'))
-    final_seg = nib.Nifti1Image(resized_seg, seg.affine)
-    nib.save(final_seg, os.path.join('./Data/Resampled/', f'{row['ID']}_resampled_seg.nii.gz'))
+    nib.save(final_img, os.path.join('./Data/', f'{row['ID']}_resampled_img.nii.gz'))
+    # final_seg = nib.Nifti1Image(resized_seg, seg.affine)
+    # nib.save(final_seg, os.path.join('./Data/Resampled/', f'{row['ID']}_resampled_seg.nii.gz'))

@@ -5,6 +5,9 @@ from transformers import ViTForImageClassification, ViTConfig
 import pandas as pd
 import os
 import time
+from vit_model import ViTModelCustom
+import torchio as tio
+from sklearn.model_selection import train_test_split
 
 torch.manual_seed(1234567890)
 print('Reading Data...')
@@ -12,19 +15,40 @@ df = pd.read_excel('./Data/image_data.xlsx')
 dataset = CTScanData(df)
 df = df.sample(frac=1).reset_index(drop=True)
 print('Data reading success!')
-split_ratio = 0.8
-split = int(len(df)*split_ratio)
-indices = [*range(len(df))]
+# split_ratio = 0.8
+# split = int(len(df)*split_ratio)
+# indices = [*range(len(df))]
 
-train_sampler = SubsetRandomSampler(indices[:split])
-valid_sampler = SubsetRandomSampler(indices[split:])
+# train_sampler = SubsetRandomSampler(indices[:split])
+# valid_sampler = SubsetRandomSampler(indices[split:])
+
+train_set, valid_set = train_test_split(df, test_size=0.2, stratify=df['target'])
+train_sampler = list(train_set.index)
+valid_sampler = list(valid_set.index)
 
 batch_size = 4
 print('Preparing Dataloader')
-train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, 
-                                           sampler=train_sampler)
-validation_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
-                                                sampler=valid_sampler)
+
+train_transforms = tio.Compose([
+    tio.RandomAffine(scales=(0.9, 1.1), degrees=10),
+    tio.RandomFlip(axes=(0, 1, 2)),
+    tio.RescaleIntensity(out_min_max=(0, 1)),
+    tio.CropOrPad((224, 224, 224)),
+    tio.ToCanonical()
+])
+
+validation_transforms = tio.Compose([
+    tio.RescaleIntensity(out_min_max=(0, 1)),
+    tio.CropOrPad((224, 224, 224)),
+    tio.ToCanonical()
+])
+
+train_dataset = CTScanData(df.iloc[train_sampler].reset_index(drop=True), transforms_=train_transforms)
+validation_dataset = CTScanData(df.iloc[valid_sampler].reset_index(drop=True))
+batch_size = 4
+
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size)
+validation_loader = torch.utils.data.DataLoader(validation_dataset, batch_size=batch_size)
 print('DataLoader successful')
 print(f'{len(train_sampler)} images in Train loader | {len(valid_sampler)} images in Valid loader')
 print(f'Num of train batches: {len(train_loader)} | Num of valid batches: {len(validation_loader)}')
@@ -45,19 +69,20 @@ config = ViTConfig(
     num_hidden_layers=12,
     num_attention_heads=12,
     intermediate_size=3072,
-    hidden_dropout_prob = 0.2,
+    hidden_dropout_prob = 0.1,
     hidden_act = "gelu"
 
 )
 
 # Initialize the model
 model = ViTForImageClassification(config)
+# model = ViTModelCustom(config, device)
 model.to(device)
 
 # Define optimizer and loss function
-optimizer = torch.optim.Adam(model.parameters(), lr=7e-5)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 criterion = torch.nn.CrossEntropyLoss()
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
+# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
 
 # Training function
 def train_one_epoch(model, train_loader, criterion, optimizer, device):
@@ -104,7 +129,7 @@ def validate(model, validation_loader, criterion, device):
     return valid_loss, valid_acc
 
 # Training loop
-num_epochs = 300
+num_epochs = 550
 least_val_loss = 0
 print('Starting Training...')
 start = time.time()
@@ -116,7 +141,7 @@ for epoch in range(num_epochs):
     model_results.loc[epoch, 'valid_loss'] = valid_loss
     model_results.loc[epoch, 'train_acc'] = train_acc
     model_results.loc[epoch, 'valid_acc'] = valid_acc
-    scheduler.step()
+    # scheduler.step()
     if num_epochs > 0 and valid_loss < least_val_loss:    
         torch.save(model.state_dict(), os.path.join(model_save_path, 'best_model.pt'))
         least_val_loss = valid_loss
