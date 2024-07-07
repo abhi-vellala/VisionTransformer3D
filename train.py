@@ -1,13 +1,39 @@
 import torch
 from dataloader import CTScanData
-from torch.utils.data.sampler import SubsetRandomSampler
-from transformers import ViTForImageClassification, ViTConfig
 import pandas as pd
 import os
 import time
-from vit_model import ViTModelCustom
-import torchio as tio
+from vit_model import VisionTransformer3D
 from sklearn.model_selection import train_test_split
+from monai.transforms import (
+    Compose, EnsureChannelFirst, ScaleIntensity, RandRotate90, RandFlip,
+    RandZoom, RandGaussianNoise, SpatialPad, RandAffine, ToNumpy
+)
+
+device_type = 'local' # server
+
+batch_size = 1 if device_type == 'local' else 16
+model_save_path = './Data/model_save/'
+d_model = 224
+num_heads = 8
+hidden_dim = 768
+# patch_size = 16
+# stride = 16
+num_classes = 2
+# image_size = 224
+trans_depth = 1
+learning_rate = 1e-4
+weight_decay=0.01
+num_epochs = 5
+
+if device_type == 'server':
+    torch.distributed.init_process_group(backend='nccl')
+    local_rank = torch.distributed.get_rank()
+    torch.cuda.set_device(local_rank)
+    device = torch.device("cuda", local_rank)
+else:
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 torch.manual_seed(1234567890)
 print('Reading Data...')
@@ -15,74 +41,74 @@ df = pd.read_excel('./Data/image_data.xlsx')
 dataset = CTScanData(df)
 df = df.sample(frac=1).reset_index(drop=True)
 print('Data reading success!')
-# split_ratio = 0.8
-# split = int(len(df)*split_ratio)
-# indices = [*range(len(df))]
-
-# train_sampler = SubsetRandomSampler(indices[:split])
-# valid_sampler = SubsetRandomSampler(indices[split:])
 
 train_set, valid_set = train_test_split(df, test_size=0.2, stratify=df['target'])
 train_sampler = list(train_set.index)
 valid_sampler = list(valid_set.index)
 
-batch_size = 4
 print('Preparing Dataloader')
 
-train_transforms = tio.Compose([
-    tio.RandomAffine(scales=(0.9, 1.1), degrees=10),
-    tio.RandomFlip(axes=(0, 1, 2)),
-    tio.RescaleIntensity(out_min_max=(0, 1)),
-    tio.CropOrPad((224, 224, 224)),
-    tio.ToCanonical()
-])
+train_transforms = Compose([
+        # LoadImage(image_only=True),
+        ScaleIntensity(),
+        RandRotate90(prob=0.5),
+        RandFlip(prob=0.5),
+        RandZoom(min_zoom=0.9, max_zoom=1.1, prob=0.5),
+        RandGaussianNoise(prob=0.5),
+        SpatialPad((224, 224, 224)),
+        RandAffine(prob=0.5),
+        EnsureChannelFirst(channel_dim="no_channel"),
+        ToNumpy(),
+        # torchvision.transforms.ToTensor(),
+    ])
 
-validation_transforms = tio.Compose([
-    tio.RescaleIntensity(out_min_max=(0, 1)),
-    tio.CropOrPad((224, 224, 224)),
-    tio.ToCanonical()
-])
+val_transforms = Compose([
+        # LoadImage(image_only=True),
+        ScaleIntensity(),
+        SpatialPad((224, 224, 224)),
+        EnsureChannelFirst(channel_dim="no_channel"),
+        ToNumpy(),
+        # torchvision.transforms.ToTensor(),
+    ])
 
-train_dataset = CTScanData(df.iloc[train_sampler].reset_index(drop=True), transforms_=train_transforms)
-validation_dataset = CTScanData(df.iloc[valid_sampler].reset_index(drop=True))
-batch_size = 4
+train_dataset = CTScanData(df.iloc[train_sampler].reset_index(drop=True), transform=train_transforms)
+validation_dataset = CTScanData(df.iloc[valid_sampler].reset_index(drop=True), transform=val_transforms)
 
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size)
-validation_loader = torch.utils.data.DataLoader(validation_dataset, batch_size=batch_size)
+if device_type =='server':
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(validation_dataset)
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, sampler=train_sampler, num_workers=4, pin_memory=True
+    )
+    val_loader = torch.utils.data.DataLoader(
+        validation_dataset, batch_size=batch_size, sampler=val_sampler, num_workers=4, pin_memory=True
+    )
+else:
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size)
+    validation_loader = torch.utils.data.DataLoader(validation_dataset, batch_size=batch_size)
+
 print('DataLoader successful')
 print(f'{len(train_sampler)} images in Train loader | {len(valid_sampler)} images in Valid loader')
 print(f'Num of train batches: {len(train_loader)} | Num of valid batches: {len(validation_loader)}')
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 print(f'Device is set to {device}')
 
 model_results = pd.DataFrame(columns=['epoch', 'train_loss', 'valid_loss', 'train_acc', 'valid_acc'])
-model_save_path = './Data/model_save/'
 
-# Configure the Vision Transformer
-config = ViTConfig(
-    image_size=224,
-    patch_size=16,
-    num_channels=224,  # Depth dimension as channels
-    num_labels=2,     # Number of classes
-    hidden_size=768,
-    num_hidden_layers=12,
-    num_attention_heads=12,
-    intermediate_size=3072,
-    hidden_dropout_prob = 0.1,
-    hidden_act = "gelu"
 
-)
-
-# Initialize the model
-model = ViTForImageClassification(config)
-# model = ViTModelCustom(config, device)
-model.to(device)
+model = VisionTransformer3D(d_model, hidden_dim, num_heads, num_classes, device, trans_depth=trans_depth)
+if device_type == 'server':
+     model = torch.nn.parallel.DistributedDataParallel(model.to(device), device_ids=[local_rank])
+else:
+    model = model.to(device)
 
 # Define optimizer and loss function
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 criterion = torch.nn.CrossEntropyLoss()
 # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
 # Training function
 def train_one_epoch(model, train_loader, criterion, optimizer, device):
@@ -94,7 +120,8 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device):
     for inputs, labels in train_loader:
         inputs, labels = inputs.to(device), labels.to(device)
         optimizer.zero_grad()
-        outputs = model(inputs).logits
+        outputs = model(inputs)
+        # print(type(outputs))
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -129,7 +156,6 @@ def validate(model, validation_loader, criterion, device):
     return valid_loss, valid_acc
 
 # Training loop
-num_epochs = 550
 least_val_loss = 0
 print('Starting Training...')
 start = time.time()
