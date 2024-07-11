@@ -44,20 +44,11 @@ class CTScanData(torch.utils.data.Dataset):
         
         image_path = Path(self.df.loc[index, 'image'])
         image = nib.load(image_path).get_fdata()
-        image = self.normalize(image)
+        # image = self.normalize(image)
         image = torch.from_numpy(image)
         target_shape = (224, 224, 224)
         image = self.resample_image(image, target_shape)
         image = torch.tensor(image).unsqueeze(0)
-        # image = torch.permute(image, (2,0,1))
-        # image = image.unsqueeze(0).unsqueeze(0)
-        # print(f'Original Shape: {image.shape}')
-        # original_shape = image.shape
-        
-        # image = torch.nn.functional.interpolate(image, size=target_shape, mode='trilinear')
-        # image = image.squeeze(0).squeeze(0)
-        # print(f'After interpolation: {image.shape}')
-        # print(self.df.loc[index, 'target'])
         if self.transform:
             image = self.transform(image)
         image = image.squeeze(0)

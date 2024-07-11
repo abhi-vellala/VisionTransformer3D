@@ -1,4 +1,6 @@
 import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
 
 class PatchEmbedding3D(torch.nn.Module):
     def __init__(self, in_channels, patch_size, emb_size):
@@ -9,9 +11,13 @@ class PatchEmbedding3D(torch.nn.Module):
 
     def forward(self, x):
         x = self.proj(x)
+        print(f'x after conv3d: {x.size()}')
         x = x.flatten(2)  # Flatten the spatial dimensions
+        print(f'x after flatten: {x.size()}')
         x = x.transpose(1, 2)  # Rearrange to (batch_size, num_patches, emb_size)
+        print(f'x after transpose: {x.size()}')
         return x
+    
     
 class Attention(torch.nn.Module):
     def __init__(self, d_model, num_heads=8, dropout=0.) -> None:
@@ -38,8 +44,11 @@ class Attention(torch.nn.Module):
         assert self.d_model == x.size(-1)
         batch_size, n, _ = x.size()
         qkv = self.qkv_layer(x)
+        # print(qkv.size())
         qkv = qkv.view(batch_size, self.num_heads, n, 3*self.head_dim)
+        # print(qkv.size())
         q, k, v = qkv.chunk(3, dim=-1)
+        # print(q.size(), k.size(), v.size()) 
         attended, vhat = self.scaled_dot_product(q, k, v)
         vhat = vhat.view(batch_size, n, self.d_model)
         out = self.linear_layer(vhat)
@@ -70,13 +79,14 @@ class TransformerBlock(torch.nn.Module):
  
     def forward(self, x):
         attn_out, attn_weights = self.attention_layer(x)
-        x = x + attn_out
-        x = x + self.feedforward_layer(x)
+        x += attn_out
+        x += self.feedforward_layer(x)
         return x, attn_weights
     
 class VisionTransformer3D(torch.nn.Module):
     def __init__(self, in_channels, d_model, feedforward_dim, patch_size, num_classes, num_heads=8, num_layers=1, drop_out=0.):
         super(VisionTransformer3D, self).__init__()
+        # self.patch_embedding = PatchEmbedding3D2(patch_size, patch_stride, d_model)
         self.patch_embedding = PatchEmbedding3D(in_channels, patch_size, d_model)
         self.num_patches = (224//patch_size)**3
         self.cls_token = torch.nn.Parameter(torch.randn(1, 1, d_model))
@@ -90,14 +100,27 @@ class VisionTransformer3D(torch.nn.Module):
     def forward(self, x):
         batch_size, c, h, w, d = x.size()
         x = self.patch_embedding(x)
+        print(f'Number of patches: {self.num_patches}')
+        print(f'X after patch embedding: {x.size()}')
+        print(f'cls_token: {self.cls_token.size()}')
         cls_token = self.cls_token.expand(batch_size, -1, -1)
+        print(f'cls_token shape: {cls_token.size()}')
         x = torch.cat([cls_token, x], dim=1)
         assert x[:,0].size() == cls_token[:,0].size()
+        print(f'x shape after cat cls_token: {x.size()}')
+        print(f'pos embedding shape: {self.pos_embedding.size()}')
         x += self.pos_embedding
+        print(f'x after pos embedding: {x.size()}')
+        # attentions = []
         for layer in self.transformerlayers:
             x, attn_weights = layer(x)
+            # attentions.append(attn_weights)
+        print(f'x after transformer: {x.size()}')
+        print(f'attention output: {attn_weights.size()}')
+        # print(f'Attentions: {len(attentions)}')
         x = self.layer_norm(x)
         cls_logits = self.last_linear_layer(x[:,0])
+        print(f'logits shape: {cls_logits.size()}')
         return cls_logits, attn_weights
     
 def UpsampleAttentionMap(attention_map, size):
@@ -114,6 +137,8 @@ if __name__ == '__main__':
     feedforward_dim = 512
     num_heads = 8
     patch_size = 16
+    patch_stride = 16
+    image_size = 224
     num_layers = 12
     dropout = 0.1
     num_classes = 2
