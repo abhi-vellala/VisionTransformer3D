@@ -1,3 +1,5 @@
+# Testing ViT model
+
 from transformers import ViTForImageClassification, ViTConfig, ViTModel
 import torch
 

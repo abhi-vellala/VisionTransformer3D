@@ -1,3 +1,5 @@
+# Helper function to check check the resampled data after interpolation. 
+
 import nibabel as nib
 import pandas as pd
 import scipy.ndimage

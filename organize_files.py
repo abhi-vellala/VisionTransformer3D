@@ -1,3 +1,5 @@
+#Helper function to seperate segmentation files and image files 
+
 import os
 
 data_path = "C:\\Users\\Admin\\Desktop\\PhD\\Projects\\VisionTransformer\\Data"

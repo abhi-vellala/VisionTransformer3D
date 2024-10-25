@@ -1,3 +1,9 @@
+# Pre-DataLoader for model training. 
+# Encodes target into labels
+# Reads images and gives tensors
+# Resample function for image interpolation
+# gives DataLoader with images and labels
+
 import torch
 # import torchvision.transforms as transforms
 import os
