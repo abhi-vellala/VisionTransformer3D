@@ -1,2 +1,5 @@
 **/__pycache__/
 **/Data
+**/.ipynb_checkpoints
+check_data_transform.ipynb
+**/test_models
