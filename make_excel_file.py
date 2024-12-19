@@ -1,3 +1,8 @@
+# Takes original excel file, extracts target from the excel. 
+# Take the path of the images and matches it with ID from the original excel file
+# Makes a new excel file with ID, image_path, age and target. Write the excel file.  
+# Note: Target {0: (50-60), 1: (70-80)} 
+
 import pandas as pd
 import os
 
